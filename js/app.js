@@ -4,7 +4,9 @@ import {
   getAllLogs,
   saveLog,
   deleteLog,
+  clearDemoLogs,
   clearAllLogs,
+  isDemoLog,
   getSettings,
   saveSettings,
   saveEncryptedApiKey,
@@ -519,6 +521,9 @@ function renderLogsList() {
       const timeRange = log.endTime ? `${log.startTime} - ${log.endTime}` : `Inicio: ${log.startTime || '--:--'}`;
       const typeLabel = TYPE_LABELS[log.type] || 'Normal';
       const safeNote = escapeHTML(log.notes || 'Sin nota');
+      const demoBadge = isDemoLog(log)
+        ? '<span class="badge" style="background:rgba(148,163,184,0.18);color:var(--text-muted);">🧪 Demo</span>'
+        : '';
 
       return `
         <article class="log-item" data-id="${escapeHTML(log.id)}">
@@ -537,6 +542,7 @@ function renderLogsList() {
           <div class="log-bottom">
             <div class="log-note-wrap">
               <span class="badge badge-${escapeHTML(log.type || 'normal')}">${escapeHTML(typeLabel)}</span>
+              ${demoBadge}
               <span class="log-note" title="${safeNote}">${safeNote}</span>
             </div>
             <div class="log-actions">
@@ -813,7 +819,19 @@ async function refreshSettingsView() {
 
   populateModelSelect(state.detectedModels);
 
-  $('db-total-count').textContent = `${state.logs.length} registros`;
+  const demoCount = state.logs.filter((l) => isDemoLog(l)).length;
+  $('db-total-count').textContent = demoCount > 0
+    ? `${state.logs.length} registros (${demoCount} Demo)`
+    : `${state.logs.length} registros`;
+
+  const clearDemoBtn = $('btn-clear-demo');
+  if (demoCount > 0) {
+    clearDemoBtn.textContent = `🧹 Quitar solo datos Demo (${demoCount})`;
+    clearDemoBtn.classList.remove('hidden');
+  } else {
+    clearDemoBtn.classList.add('hidden');
+  }
+
   const storage = await getStorageStatus();
   $('db-persist-status').textContent = storage.persisted
     ? '✅ Protegido (Persistente)'
@@ -1177,6 +1195,24 @@ function bindEvents() {
     const count = await seedDemoData();
     await reloadDataAndUI();
     showToast(`🧪 ${count} registros Demo añadidos`);
+  });
+
+  $('btn-clear-demo').addEventListener('click', async () => {
+    const demoCount = state.logs.filter((l) => isDemoLog(l)).length;
+    if (demoCount === 0) {
+      showToast('No hay datos Demo que quitar');
+      return;
+    }
+    const realCount = state.logs.length - demoCount;
+    if (!confirm(`Se quitarán los ${demoCount} registros de prueba (Demo) y se conservarán intactos tus ${realCount} registros reales. ¿Continuar?`)) {
+      return;
+    }
+    const removed = await clearDemoLogs();
+    if (state.editingId && !state.logs.some((l) => l.id === state.editingId && !isDemoLog(l))) {
+      resetEntryForm();
+    }
+    await reloadDataAndUI();
+    showToast(`🧹 ${removed} registros Demo eliminados`);
   });
 
   $('btn-clear-db').addEventListener('click', async () => {

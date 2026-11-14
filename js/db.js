@@ -19,6 +19,34 @@ const LEGACY_BLOCKED_MODELS = new Set([
   'gemini-1.5-pro'
 ]);
 
+const DEMO_SCENARIO_NOTES = new Set([
+  'Cierre de facturación mensual',
+  'Preparación auditoría interna',
+  'Compensable por días libres',
+  'Entrega urgente de proyecto',
+  'Inventario de sábado',
+  'Guardia festivo local',
+  'Despliegue y soporte nocturno',
+  'Revisión de incidencias con cliente',
+  'Banco de horas de descanso',
+  'Actualización trimestral',
+  'Soporte cierre semanal',
+  'Ventana de mantenimiento',
+  'Soporte de fin de semana',
+  'Cierre de entregas semanales'
+]);
+
+/**
+ * Indica si un registro pertenece al conjunto de datos de prueba (Demo).
+ */
+export function isDemoLog(log) {
+  if (!log || typeof log !== 'object') return false;
+  if (log.isDemo === true) return true;
+  if (typeof log.id === 'string' && log.id.startsWith('demo-')) return true;
+  if (typeof log.notes === 'string' && DEMO_SCENARIO_NOTES.has(log.notes.trim())) return true;
+  return false;
+}
+
 export const DEFAULT_SETTINGS = {
   defaultHourlyRate: '',
   monthlyTargetHours: 20,
@@ -148,8 +176,9 @@ export function normalizeEntry(entry, { allowAutoEndTime = false } = {}) {
   const validTypes = ['normal', 'fin_de_semana', 'festivo', 'nocturna'];
   const type = validTypes.includes(entry.type) ? entry.type : 'normal';
   const now = Date.now();
+  const isDemo = Boolean(entry.isDemo || (typeof entry.id === 'string' && entry.id.startsWith('demo-')));
 
-  return {
+  const normalized = {
     id: entry.id || generateId(),
     date: entry.date,
     startTime,
@@ -161,6 +190,12 @@ export function normalizeEntry(entry, { allowAutoEndTime = false } = {}) {
     createdAt: entry.createdAt || now,
     updatedAt: now
   };
+
+  if (isDemo) {
+    normalized.isDemo = true;
+  }
+
+  return normalized;
 }
 
 /**
@@ -235,6 +270,27 @@ export async function deleteLog(id) {
 
     request.onsuccess = () => resolve(true);
     request.onerror = () => reject(request.error);
+  });
+}
+
+/**
+ * Elimina únicamente los registros de prueba (Demo), manteniendo intactos los reales.
+ * Devuelve el número de registros Demo eliminados.
+ */
+export async function clearDemoLogs() {
+  const logs = await getAllLogs();
+  const demoLogs = logs.filter((log) => isDemoLog(log));
+  if (demoLogs.length === 0) return 0;
+
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    for (const log of demoLogs) {
+      store.delete(log.id);
+    }
+    tx.oncomplete = () => resolve(demoLogs.length);
+    tx.onerror = () => reject(tx.error);
   });
 }
 
@@ -605,6 +661,8 @@ export async function seedDemoData() {
     usedDates.add(dateStr);
 
     entries.push({
+      id: `demo-${dateStr}`,
+      isDemo: true,
       date: dateStr,
       startTime: chosen.start,
       endTime: addHoursToTime(chosen.start, chosen.hours),
