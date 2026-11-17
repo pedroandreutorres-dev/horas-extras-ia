@@ -33,7 +33,7 @@ import {
   subtractHoursFromTime
 } from './analytics.js';
 
-import { updateDashboardCharts, renderChatChart } from './charts.js';
+import { updateDashboardCharts, renderChatChart, canShareImageFiles, exportOrShareChart } from './charts.js';
 
 import {
   DEFAULT_GEMINI_MODEL,
@@ -635,6 +635,43 @@ function restoreChatHistoryUI() {
   }
 }
 
+function slugifyFilename(text) {
+  return String(text || 'grafica')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 42) || 'grafica';
+}
+
+const PERIOD_LABELS = {
+  week: 'Esta semana',
+  month: 'Este mes',
+  '3months': 'Últimos 3 meses',
+  year: 'Este año',
+  all: 'Todo el historial'
+};
+
+async function handleChartExportOrShare({ canvas, title, subtitle = '', mode = 'download' }) {
+  try {
+    const filename = `grafica-${slugifyFilename(title)}-${getTodayISO()}.png`;
+    const result = await exportOrShareChart(canvas, {
+      filename,
+      title,
+      subtitle,
+      theme: state.settings.theme,
+      mode
+    });
+    if (result === 'downloaded') {
+      showToast('🖼️ Gráfica descargada en PNG');
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return;
+    showToast(`⚠️ ${err?.message || 'No se pudo exportar la gráfica'}`);
+  }
+}
+
 function appendChatBubble({
   role,
   text,
@@ -699,8 +736,50 @@ function appendChatBubble({
   if (!isBlocked && chart && chart.should_render && Array.isArray(chart.labels) && chart.labels.length > 0 && Array.isArray(chart.datasets) && chart.datasets.length > 0) {
     const chartBox = document.createElement('div');
     chartBox.className = 'chat-chart-box';
+
+    const canvasWrap = document.createElement('div');
+    canvasWrap.className = 'chat-chart-canvas-wrap';
     const canvas = document.createElement('canvas');
-    chartBox.appendChild(canvas);
+    canvasWrap.appendChild(canvas);
+    chartBox.appendChild(canvasWrap);
+
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'chat-chart-actions';
+    const chartTitle = chart.title || 'Análisis de horas extras';
+
+    const dlBtn = document.createElement('button');
+    dlBtn.type = 'button';
+    dlBtn.className = 'chart-icon-btn';
+    dlBtn.title = 'Descargar PNG';
+    dlBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg><span>Descargar</span>';
+    dlBtn.addEventListener('click', () => {
+      handleChartExportOrShare({
+        canvas,
+        title: chartTitle,
+        subtitle: `Generada el ${getTodayISO()}`,
+        mode: 'download'
+      });
+    });
+    actionsRow.appendChild(dlBtn);
+
+    if (canShareImageFiles()) {
+      const shareBtn = document.createElement('button');
+      shareBtn.type = 'button';
+      shareBtn.className = 'chart-icon-btn';
+      shareBtn.title = 'Compartir imagen';
+      shareBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98"/><path d="M15.41 6.51l-6.82 3.98"/></svg><span>Compartir</span>';
+      shareBtn.addEventListener('click', () => {
+        handleChartExportOrShare({
+          canvas,
+          title: chartTitle,
+          subtitle: `Generada el ${getTodayISO()}`,
+          mode: 'share'
+        });
+      });
+      actionsRow.appendChild(shareBtn);
+    }
+
+    chartBox.appendChild(actionsRow);
     bubble.appendChild(chartBox);
     // Renderizar cuando el canvas ya está en el DOM
     requestAnimationFrame(() => {
@@ -1006,7 +1085,7 @@ function bindEvents() {
     }
   });
 
-  // Dashboard periodos
+  // Dashboard periodos y exportación de gráficas
   document.querySelectorAll('#dashboard-periods .period-pill').forEach((pill) => {
     pill.addEventListener('click', () => {
       state.dashboardPeriod = pill.dataset.period;
@@ -1014,6 +1093,25 @@ function bindEvents() {
         p.classList.toggle('active', p === pill);
       });
       renderDashboard();
+    });
+  });
+
+  $('dashboard-content').addEventListener('click', (e) => {
+    const dlBtn = e.target.closest('.btn-chart-download');
+    const shareBtn = e.target.closest('.btn-chart-share');
+    const btn = dlBtn || shareBtn;
+    if (!btn) return;
+
+    const canvas = $(btn.dataset.chartId);
+    const title = btn.dataset.chartTitle || 'Gráfica';
+    const periodText = PERIOD_LABELS[state.dashboardPeriod] || '';
+    const subtitle = periodText ? `${periodText} · ${getTodayISO()}` : getTodayISO();
+
+    handleChartExportOrShare({
+      canvas,
+      title,
+      subtitle,
+      mode: shareBtn ? 'share' : 'download'
     });
   });
 
@@ -1244,6 +1342,12 @@ async function init() {
   updateCurrencySymbols();
   resetEntryForm();
   bindEvents();
+
+  if (canShareImageFiles()) {
+    document.querySelectorAll('.btn-chart-share').forEach((btn) => {
+      btn.classList.remove('hidden');
+    });
+  }
 
   // Migrar automáticamente cualquier clave antigua en localStorage hacia la bóveda AES-GCM
   try {

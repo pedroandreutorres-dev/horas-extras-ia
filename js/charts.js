@@ -412,3 +412,97 @@ export function renderChatChart(canvas, chartConfig, theme = 'dark') {
     options
   });
 }
+
+/**
+ * Comprueba si el navegador soporta compartir archivos de imagen vía Web Share API (ej. Android).
+ */
+export function canShareImageFiles() {
+  if (typeof navigator === 'undefined' || typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') {
+    return false;
+  }
+  if (typeof File === 'undefined') return false;
+  try {
+    const probeFile = new File([new Uint8Array([0])], 'probe.png', { type: 'image/png' });
+    return navigator.canShare({ files: [probeFile] });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Genera un Blob PNG nítido con fondo sólido del tema actual y cabecera opcional.
+ */
+export async function renderChartExportBlob(canvas, { title = '', subtitle = '', theme = 'dark' } = {}) {
+  if (!canvas || canvas.width === 0 || canvas.height === 0) {
+    throw new Error('La gráfica todavía no está lista para exportar.');
+  }
+
+  const colors = getThemeColors(theme);
+  const rawScale = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1;
+  const scale = Math.max(1, Math.min(3, rawScale));
+
+  const pad = Math.round(20 * scale);
+  const headerH = title ? Math.round((subtitle ? 48 : 30) * scale) : 0;
+
+  const out = document.createElement('canvas');
+  out.width = canvas.width + pad * 2;
+  out.height = canvas.height + pad * 2 + headerH;
+
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = colors.surface;
+  ctx.fillRect(0, 0, out.width, out.height);
+
+  if (title) {
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = colors.text;
+    ctx.font = `700 ${Math.round(15 * scale)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    ctx.fillText(title, pad, pad, out.width - pad * 2);
+
+    if (subtitle) {
+      ctx.fillStyle = colors.muted;
+      ctx.font = `500 ${Math.round(12 * scale)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      ctx.fillText(subtitle, pad, pad + Math.round(22 * scale), out.width - pad * 2);
+    }
+  }
+
+  ctx.drawImage(canvas, pad, pad + headerH);
+
+  return new Promise((resolve, reject) => {
+    out.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('No se pudo generar la imagen PNG.'));
+    }, 'image/png');
+  });
+}
+
+/**
+ * Descarga o comparte una gráfica como archivo PNG con fondo legible.
+ */
+export async function exportOrShareChart(canvas, {
+  filename = 'grafica-horas-extras.png',
+  title = 'Gráfica de Horas Extras',
+  subtitle = '',
+  theme = 'dark',
+  mode = 'download'
+} = {}) {
+  const blob = await renderChartExportBlob(canvas, { title, subtitle, theme });
+
+  if (mode === 'share' && canShareImageFiles()) {
+    const file = new File([blob], filename, { type: 'image/png' });
+    await navigator.share({
+      title,
+      files: [file]
+    });
+    return 'shared';
+  }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return 'downloaded';
+}
