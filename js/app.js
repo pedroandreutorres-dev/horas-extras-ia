@@ -1,6 +1,5 @@
 import {
   requestPersistentStorage,
-  getStorageStatus,
   getAllLogs,
   saveLog,
   deleteLog,
@@ -280,16 +279,18 @@ function updateLivePreview() {
   const rateRaw = $('entry-rate').value.trim();
   const rate = rateRaw === '' ? null : Number.parseFloat(rateRaw);
   const preview = $('live-total-preview');
+  const clearRateBtn = $('btn-clear-rate');
   const currency = state.settings.currency || '€';
+
+  if (clearRateBtn) {
+    clearRateBtn.classList.toggle('hidden', rateRaw === '');
+  }
 
   if (Number.isFinite(hours) && hours > 0 && rate !== null && Number.isFinite(rate) && rate > 0) {
     preview.textContent = `${formatNumber(hours * rate, 2)} ${currency}`;
     preview.style.color = 'var(--green)';
-  } else if (Number.isFinite(hours) && hours > 0) {
-    preview.textContent = `${formatHours(hours)} h · Sin importe asignado`;
-    preview.style.color = 'var(--text-muted)';
   } else {
-    preview.textContent = 'Sin precio asignado';
+    preview.textContent = '—';
     preview.style.color = 'var(--text-muted)';
   }
 }
@@ -599,7 +600,6 @@ function renderDashboard() {
 function refreshAIStatusBanner() {
   const hasKey = hasConfiguredApiKey();
   $('ai-key-banner').classList.toggle('hidden', hasKey);
-  $('ai-active-model').textContent = state.settings.geminiModel || DEFAULT_GEMINI_MODEL;
   const completedTurns = Math.floor(state.chatHistory.length / 2);
   $('ai-memory-count').textContent = String(completedTurns);
 }
@@ -831,11 +831,6 @@ async function refreshSettingsView() {
   } else {
     clearDemoBtn.classList.add('hidden');
   }
-
-  const storage = await getStorageStatus();
-  $('db-persist-status').textContent = storage.persisted
-    ? '✅ Protegido (Persistente)'
-    : 'ℹ️ Estándar del navegador';
 }
 
 // ==================== REFRESCO GLOBAL ====================
@@ -909,13 +904,6 @@ function bindEvents() {
       $('entry-hours').value = btn.dataset.hours;
       handleHoursChange();
     });
-  });
-
-  $('btn-add-half-hour').addEventListener('click', () => {
-    const current = Number.parseFloat($('entry-hours').value) || 0;
-    const next = Math.min(24, Math.round((current + 0.5) * 100) / 100);
-    $('entry-hours').value = next;
-    handleHoursChange();
   });
 
   $('btn-clear-rate').addEventListener('click', () => {
@@ -995,13 +983,6 @@ function bindEvents() {
     });
   });
 
-  $('btn-dash-go-register').addEventListener('click', () => switchView('view-register'));
-  $('btn-dash-load-demo').addEventListener('click', async () => {
-    const count = await seedDemoData();
-    await reloadDataAndUI();
-    showToast(`🧪 ${count} registros Demo cargados`);
-  });
-
   // Asistente IA
   $('btn-ai-go-settings').addEventListener('click', () => switchView('view-settings'));
 
@@ -1066,41 +1047,21 @@ function bindEvents() {
     input.type = input.type === 'password' ? 'text' : 'password';
   });
 
+  $('set-gemini-model').addEventListener('change', () => {
+    const chosenModel = $('set-gemini-model').value;
+    state.settings = saveSettings({ geminiModel: chosenModel });
+    refreshAIStatusBanner();
+    showToast(`🤖 Modelo cambiado a ${chosenModel}`);
+  });
+
   $('settings-ai-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const typedKey = $('set-gemini-key').value.trim();
-
-    if (typedKey) {
-      await saveEncryptedApiKey(typedKey);
-      $('set-gemini-key').value = '';
-    }
-
-    state.settings = saveSettings({
-      geminiModel: $('set-gemini-model').value
-    });
-
-    await refreshSettingsView();
-    refreshAIStatusBanner();
-    showToast(typedKey ? '🔒 API Key cifrada y configuración guardada' : '🤖 Modelo de Gemini actualizado');
-  });
-
-  $('btn-clear-api-key').addEventListener('click', async () => {
-    if (!confirm('¿Seguro que quieres borrar tu API Key cifrada de este dispositivo?')) return;
-    await clearEncryptedApiKey();
-    state.settings = getSettings();
-    $('ai-detect-status').classList.add('hidden');
-    await refreshSettingsView();
-    refreshAIStatusBanner();
-    showToast('🗑️ API Key eliminada de la bóveda');
-  });
-
-  $('btn-detect-models').addEventListener('click', async () => {
-    const btn = $('btn-detect-models');
+    const btn = $('btn-save-verify-ai');
     const statusBox = $('ai-detect-status');
     const typedKey = $('set-gemini-key').value.trim();
 
     btn.disabled = true;
-    btn.textContent = '⏳ Consultando Google AI Studio...';
+    btn.textContent = '⏳ Guardando y comprobando...';
     statusBox.className = 'status-box';
     statusBox.classList.remove('hidden');
     statusBox.textContent = 'Verificando API Key y modelos activos...';
@@ -1135,15 +1096,29 @@ function bindEvents() {
 
       statusBox.className = 'status-box ok';
       statusBox.textContent = verifiedModel
-        ? `✅ Conexión verificada con prueba real. Modelo activo: ${bestModel} (${models.length} detectados).`
-        : `✅ Conexión correcta. ${models.length} modelos detectados (activo: ${bestModel}).`;
+        ? `✅ API Key cifrada y conexión verificada. Modelo activo: ${bestModel}.`
+        : `✅ Conexión correcta. Modelo activo: ${bestModel} (${models.length} detectados).`;
+      showToast('🔒 Configuración IA guardada y verificada');
     } catch (err) {
+      state.settings = getSettings();
+      await refreshSettingsView();
+      refreshAIStatusBanner();
       statusBox.className = 'status-box err';
       statusBox.textContent = `❌ ${sanitizeErrorMessage(err.message, typedKey)}`;
     } finally {
       btn.disabled = false;
-      btn.textContent = '🔍 Detectar modelos disponibles de mi API Key';
+      btn.textContent = '💾 Guardar y comprobar API Key';
     }
+  });
+
+  $('btn-clear-api-key').addEventListener('click', async () => {
+    if (!confirm('¿Seguro que quieres borrar tu API Key cifrada de este dispositivo?')) return;
+    await clearEncryptedApiKey();
+    state.settings = getSettings();
+    $('ai-detect-status').classList.add('hidden');
+    await refreshSettingsView();
+    refreshAIStatusBanner();
+    showToast('🗑️ API Key eliminada de la bóveda');
   });
 
   // Ajustes: Exportar / Importar / Demo / Limpiar

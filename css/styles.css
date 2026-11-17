@@ -714,27 +714,14 @@ textarea:focus {
   gap: 6px;
 }
 
-.model-pill,
-.memory-pill,
-.guardrail-pill {
+.memory-pill {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 3px 9px;
   font-weight: 600;
   white-space: nowrap;
-}
-
-.model-pill {
-  color: var(--indigo);
-}
-
-.memory-pill {
   color: var(--accent);
-}
-
-.guardrail-pill {
-  color: var(--green);
 }
 
 .chat-bubble.assistant.blocked {

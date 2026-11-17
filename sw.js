@@ -1,4 +1,4 @@
-const CACHE_NAME = 'horas-extras-v6';
+const CACHE_NAME = 'horas-extras-v7';
 
 const APP_SHELL_ASSETS = [
   './',

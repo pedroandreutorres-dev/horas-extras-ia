@@ -16,10 +16,6 @@ export const PRESET_GEMINI_MODELS = [
   {
     id: 'gemini-3.6-flash',
     label: 'gemini-3.6-flash (Alternativa Flash · Capa gratuita)'
-  },
-  {
-    id: 'gemini-2.5-flash',
-    label: 'gemini-2.5-flash (Solo cuentas antiguas con acceso legado)'
   }
 ];
 

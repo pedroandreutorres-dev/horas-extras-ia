@@ -85,10 +85,7 @@
             </div>
 
             <div class="field">
-              <label for="entry-hours">
-                <span>Horas totales</span>
-                <button type="button" id="btn-add-half-hour" class="chip-btn" style="padding:2px 8px;font-size:0.74rem;">+0.5 h</button>
-              </label>
+              <label for="entry-hours">Horas totales</label>
               <input type="number" id="entry-hours" step="0.25" min="0.25" max="24" placeholder="Ej. 2 o 1.5" required />
               <div class="quick-chips" aria-label="Toque rápido de horas">
                 <button type="button" class="chip-btn quick-hour-btn" data-hours="0.5">0.5 h</button>
@@ -106,13 +103,13 @@
               </label>
               <div class="rate-row">
                 <input type="number" id="entry-rate" step="0.01" min="0" placeholder="Vacío si no aplica o es compensable" />
-                <button type="button" id="btn-clear-rate" class="btn btn-secondary btn-sm" style="white-space:nowrap;">Sin precio</button>
+                <button type="button" id="btn-clear-rate" class="btn btn-secondary btn-sm hidden" style="white-space:nowrap;">Sin precio</button>
               </div>
             </div>
 
             <div class="live-total-box">
               <span>Importe calculado:</span>
-              <span class="live-total-amount" id="live-total-preview">Sin precio asignado</span>
+              <span class="live-total-amount" id="live-total-preview">—</span>
             </div>
 
             <div class="field">
@@ -167,10 +164,6 @@
 
         <div id="dashboard-empty" class="card empty-state hidden">
           <p>No hay horas registradas en este periodo.</p>
-          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:10px;">
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-dash-go-register">➕ Apuntar horas</button>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-dash-load-demo">🧪 Cargar datos Demo</button>
-          </div>
         </div>
 
         <div id="dashboard-content">
@@ -252,20 +245,17 @@
         <div class="ai-container">
           <div id="ai-key-banner" class="ai-banner hidden">
             <div><strong>🔑 Falta tu API Key gratuita de Google Gemini</strong></div>
-            <div>Necesitas una clave gratuita de Google AI Studio para hacer preguntas y pedir gráficas personalizadas sobre tus datos.</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <div>Configura tu clave gratuita de Google AI Studio en Ajustes para hacer preguntas y generar gráficas.</div>
+            <div>
               <button type="button" id="btn-ai-go-settings" class="btn btn-primary btn-sm" style="width:auto;">⚙️ Configurar en Ajustes</button>
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="text-decoration:none;">Obtener Key gratis ↗</a>
             </div>
           </div>
 
           <div class="ai-status-bar">
             <div class="ai-status-badges">
-              <span class="model-pill" id="ai-active-model">gemini-3.5-flash-lite</span>
               <span class="memory-pill">🧠 Memoria: <strong id="ai-memory-count">0</strong> turnos</span>
-              <span class="guardrail-pill">🛡️ Solo Horas Extras</span>
             </div>
-            <button type="button" id="btn-clear-chat" class="btn btn-secondary btn-sm">🧹 Limpiar</button>
+            <button type="button" id="btn-clear-chat" class="btn btn-secondary btn-sm">🧹 Nueva conversación</button>
           </div>
 
           <div class="ai-prompts" id="ai-quick-prompts">
@@ -353,9 +343,8 @@
             </div>
 
             <div class="btn-stack">
-              <button type="submit" class="btn btn-primary">Guardar configuración IA</button>
-              <button type="button" id="btn-detect-models" class="btn btn-secondary">
-                🔍 Detectar modelos disponibles de mi API Key
+              <button type="submit" id="btn-save-verify-ai" class="btn btn-primary">
+                💾 Guardar y comprobar API Key
               </button>
             </div>
 
@@ -365,7 +354,7 @@
           <ol class="guide-steps">
             <li>Entra en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a> con tu cuenta de Google.</li>
             <li>Pulsa <strong>Create API Key</strong> (sin tarjeta de crédito).</li>
-            <li>Pégala arriba y pulsa <strong>Detectar modelos</strong> para comprobar la conexión.</li>
+            <li>Pégala arriba y pulsa <strong>Guardar y comprobar API Key</strong>.</li>
           </ol>
         </div>
 
@@ -381,10 +370,6 @@
             <div class="info-row">
               <span>Registros almacenados</span>
               <strong id="db-total-count">0</strong>
-            </div>
-            <div class="info-row">
-              <span>Persistencia en Android</span>
-              <strong id="db-persist-status">Comprobando...</strong>
             </div>
           </div>
 
