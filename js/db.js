@@ -1,4 +1,5 @@
 import { isValidTimeStr, addHoursToTime } from './analytics.js';
+import { DEFAULT_GEMINI_MODEL, SUPPORTED_GEMINI_MODEL_IDS } from './llm.js';
 
 const DB_NAME = 'HorasExtrasDB';
 const DB_VERSION = 2;
@@ -328,8 +329,12 @@ export function getSettings() {
     }
     delete merged.geminiApiKey;
 
-    if (!parsed.modelMigratedV2 && LEGACY_BLOCKED_MODELS.has(merged.geminiModel)) {
-      merged.geminiModel = DEFAULT_SETTINGS.geminiModel;
+    const normalizedModel = SUPPORTED_GEMINI_MODEL_IDS.has(merged.geminiModel)
+      ? merged.geminiModel
+      : DEFAULT_GEMINI_MODEL;
+
+    if (!parsed.modelMigratedV2 || normalizedModel !== merged.geminiModel || LEGACY_BLOCKED_MODELS.has(merged.geminiModel)) {
+      merged.geminiModel = normalizedModel;
       merged.modelMigratedV2 = true;
       try {
         const persistCopy = hasLegacyPlainKey
@@ -353,6 +358,9 @@ export function getSettings() {
 export function saveSettings(partial) {
   const current = getSettings();
   const next = { ...current, ...partial, modelMigratedV2: true };
+  if (!SUPPORTED_GEMINI_MODEL_IDS.has(next.geminiModel)) {
+    next.geminiModel = DEFAULT_GEMINI_MODEL;
+  }
   delete next.geminiApiKey;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
   return next;

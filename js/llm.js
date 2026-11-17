@@ -7,23 +7,29 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 export const PRESET_GEMINI_MODELS = [
   {
     id: 'gemini-3.5-flash-lite',
-    label: 'gemini-3.5-flash-lite (Recomendado · Capa gratuita actual)'
+    label: 'gemini-3.5-flash-lite · Rápido y ligero (Recomendado)',
+    description: 'Rápido y ligero (Recomendado)'
   },
   {
     id: 'gemini-3.8-flash',
-    label: 'gemini-3.8-flash (Principal Flash · Capa gratuita)'
+    label: 'gemini-3.8-flash · Flash principal · Mayor razonamiento',
+    description: 'Flash principal · Mayor razonamiento'
   },
   {
     id: 'gemini-3.6-flash',
-    label: 'gemini-3.6-flash (Alternativa Flash · Capa gratuita)'
+    label: 'gemini-3.6-flash · Flash alternativo estable',
+    description: 'Flash alternativo estable'
+  },
+  {
+    id: 'gemini-4-hydrogen',
+    label: 'gemini-4-hydrogen · Gemini 4 · Alta capacidad',
+    description: 'Gemini 4 · Alta capacidad'
   }
 ];
 
-const FREE_TIER_FALLBACK_QUEUE = [
-  'gemini-3.5-flash-lite',
-  'gemini-3.8-flash',
-  'gemini-3.6-flash'
-];
+export const SUPPORTED_GEMINI_MODEL_IDS = new Set(PRESET_GEMINI_MODELS.map((m) => m.id));
+
+const FREE_TIER_FALLBACK_QUEUE = PRESET_GEMINI_MODELS.map((m) => m.id);
 
 const RESPONSE_SCHEMA = {
   type: 'OBJECT',
@@ -228,28 +234,6 @@ export function checkClientGuardrail(question, { hasChatHistory = false } = {}) 
   return { allowed: true };
 }
 
-function modelPriorityScore(id) {
-  if (id === 'gemini-3.5-flash-lite') return 0;
-  if (id === 'gemini-3.8-flash') return 1;
-  if (id === 'gemini-3.6-flash') return 2;
-  if (/^gemini-3.*flash-lite/.test(id)) return 3;
-  if (/^gemini-3.*flash/.test(id)) return 4;
-  if (/^gemini-3/.test(id)) return 5;
-  if (id.includes('2.5-flash')) return 7;
-  if (id.includes('pro')) return 8;
-  return 6;
-}
-
-function extractSuggestedModelFromError(message) {
-  const match = String(message || '').match(/models\/([a-z0-9.-]+)/i);
-  if (!match) return null;
-  const candidate = match[1].trim();
-  // Evitar devolver el mismo modelo bloqueado si dice "This model models/X is no longer available... use models/Y"
-  const useMatch = String(message || '').match(/use\s+models\/([a-z0-9.-]+)/i);
-  if (useMatch) return useMatch[1].trim();
-  return candidate;
-}
-
 function isModelUnavailableError(status, message) {
   if (status === 404) return true;
   const msg = String(message || '').toLowerCase();
@@ -260,6 +244,38 @@ function isModelUnavailableError(status, message) {
     msg.includes('deprecated') ||
     msg.includes('is not available to new users')
   );
+}
+
+function isFatalAuthError(status, message) {
+  if (status === 401 || status === 403) return true;
+  if (status === 400) {
+    const msg = String(message || '').toLowerCase();
+    return (
+      msg.includes('api key') ||
+      msg.includes('api_key') ||
+      msg.includes('permission') ||
+      msg.includes('billing')
+    );
+  }
+  return false;
+}
+
+function classifyFailureReason(status, message, wasEmpty = false) {
+  if (wasEmpty) return 'respuesta vacía';
+  const msg = String(message || '').toLowerCase();
+  if (status === 429 || msg.includes('quota') || msg.includes('rate limit') || msg.includes('resource exhausted')) {
+    return 'cuota agotada';
+  }
+  if (status >= 500 || msg.includes('overloaded') || msg.includes('unavailable') || msg.includes('saturated')) {
+    return 'saturación temporal';
+  }
+  if (isModelUnavailableError(status, message)) {
+    return 'modelo no disponible';
+  }
+  if (status === 0) {
+    return 'fallo temporal de red';
+  }
+  return `error HTTP ${status || 'desconocido'}`;
 }
 
 /**
@@ -310,8 +326,8 @@ async function probeModel(apiKey, modelId) {
 }
 
 /**
- * Consulta la API de Google AI Studio, prioriza la familia Gemini 3.x Free Tier
- * y verifica con una prueba real qué modelo acepta generación de texto en esta cuenta.
+ * Consulta Google AI Studio y filtra estrictamente por los modelos gratuitos vigentes
+ * compatibles con texto y Function Calling en esta app, probando todos los de la lista.
  */
 export async function detectAvailableModels(apiKey) {
   const cleanKey = (apiKey || '').trim();
@@ -342,100 +358,46 @@ export async function detectAvailableModels(apiKey) {
   }
 
   const rawModels = Array.isArray(data.models) ? data.models : [];
-  const usableMap = new Map();
-
+  const listedIds = new Set();
   for (const m of rawModels) {
     const methods = m.supportedGenerationMethods || [];
     const id = (m.name || '').replace(/^models\//, '');
-    const isExcluded =
-      !methods.includes('generateContent') ||
-      !id.includes('gemini') ||
-      id.includes('embedding') ||
-      id.includes('imagen') ||
-      id.includes('veo') ||
-      id.includes('tts') ||
-      id.includes('audio') ||
-      id.includes('robotics') ||
-      id.includes('computer-use');
-
-    if (!isExcluded) {
-      usableMap.set(id, {
-        id,
-        displayName: m.displayName || id,
-        description: m.description || '',
-        verified: false
-      });
+    if (SUPPORTED_GEMINI_MODEL_IDS.has(id) && methods.includes('generateContent')) {
+      listedIds.add(id);
     }
   }
 
-  // Asegurar que los modelos gratuitos vigentes 3.x estén considerados aunque el listado los oculte o varíe
-  for (const preset of FREE_TIER_FALLBACK_QUEUE) {
-    if (!usableMap.has(preset)) {
-      usableMap.set(preset, {
-        id: preset,
-        displayName: preset,
-        description: 'Modelo gratuito actual de Google AI Studio',
-        verified: false
-      });
-    }
-  }
+  // Probar en paralelo únicamente los modelos de nuestra lista blanca oficial
+  const probeResults = await Promise.all(
+    PRESET_GEMINI_MODELS.map(async (preset) => {
+      const probe = await probeModel(cleanKey, preset.id);
+      return { preset, probe };
+    })
+  );
 
-  const usable = Array.from(usableMap.values()).sort((a, b) => {
-    const diff = modelPriorityScore(a.id) - modelPriorityScore(b.id);
-    return diff !== 0 ? diff : a.id.localeCompare(b.id);
-  });
-
-  if (usable.length === 0) {
-    throw new Error('No se encontraron modelos Gemini compatibles con generateContent en esta cuenta.');
-  }
-
-  // Probar los candidatos principales para validar cuál responde 200 OK de verdad
-  const probeCandidates = [
-    ...FREE_TIER_FALLBACK_QUEUE,
-    ...usable.slice(0, 4).map((m) => m.id)
-  ];
-  const tried = new Set();
-  let verifiedId = null;
-
-  for (let i = 0; i < probeCandidates.length; i++) {
-    const candidateId = probeCandidates[i];
-    if (!candidateId || tried.has(candidateId)) continue;
-    tried.add(candidateId);
-
-    const probe = await probeModel(cleanKey, candidateId);
-    if (probe.ok) {
-      verifiedId = candidateId;
-      break;
+  const usable = [];
+  for (const { preset, probe } of probeResults) {
+    if (isFatalAuthError(probe.status, probe.errorMessage)) {
+      throw new Error(sanitizeErrorMessage(probe.errorMessage || `Error HTTP ${probe.status} validando la API Key.`, cleanKey));
     }
 
-    // Si Google sugiere explícitamente otro modelo en el mensaje de error, añadirlo al frente
     if (isModelUnavailableError(probe.status, probe.errorMessage)) {
-      const suggested = extractSuggestedModelFromError(probe.errorMessage);
-      if (suggested && !tried.has(suggested)) {
-        probeCandidates.splice(i + 1, 0, suggested);
-      }
       continue;
     }
 
-    // Si falla por cuota (429), la API key es válida y el modelo existe, pero hay límite temporal
-    if (probe.status === 429) {
-      verifiedId = candidateId;
-      break;
-    }
-
-    // Si es error de API key inválida (400 API key not valid / 403), abortar inmediatamente
-    if (probe.status === 400 || probe.status === 401 || probe.status === 403) {
-      throw new Error(sanitizeErrorMessage(probe.errorMessage || `Error HTTP ${probe.status} validando la API Key.`, cleanKey));
+    const verified = probe.ok || probe.status === 429;
+    if (verified || listedIds.has(preset.id)) {
+      usable.push({
+        id: preset.id,
+        displayName: preset.id,
+        description: preset.description,
+        verified
+      });
     }
   }
 
-  if (verifiedId) {
-    const entry = usable.find((m) => m.id === verifiedId);
-    if (entry) {
-      entry.verified = true;
-      // Colocar el modelo verificado el primero
-      usable.sort((a, b) => (a.id === verifiedId ? -1 : b.id === verifiedId ? 1 : 0));
-    }
+  if (usable.length === 0) {
+    throw new Error('Ninguno de los modelos gratuitos compatibles está disponible para esta API Key.');
   }
 
   return usable;
@@ -711,15 +673,18 @@ export async function askGeminiAboutOvertime({
   const systemInstruction = buildSystemInstruction(context);
   const contents = buildConversationContents(chatHistory, question);
 
-  const initialModel = (settings?.geminiModel || DEFAULT_GEMINI_MODEL).trim();
+  const requestedRaw = (settings?.geminiModel || DEFAULT_GEMINI_MODEL).trim();
+  const requestedModel = SUPPORTED_GEMINI_MODEL_IDS.has(requestedRaw) ? requestedRaw : DEFAULT_GEMINI_MODEL;
   const candidateQueue = [
-    initialModel,
-    ...FREE_TIER_FALLBACK_QUEUE.filter((m) => m !== initialModel)
+    requestedModel,
+    ...FREE_TIER_FALLBACK_QUEUE.filter((m) => m !== requestedModel)
   ];
   const attempted = new Set();
 
   let finalResult = null;
-  let usedModel = initialModel;
+  let usedModel = requestedModel;
+  let firstFailureReason = null;
+  let firstFailurePermanent = false;
 
   for (let i = 0; i < candidateQueue.length; i++) {
     const modelToTry = candidateQueue[i];
@@ -736,66 +701,48 @@ export async function askGeminiAboutOvertime({
       settings
     });
 
-    if (result.ok) {
+    if (result.ok && !result.empty && result.parsed) {
       finalResult = result;
       break;
     }
 
     const errMsg = result.data?.error?.message || '';
-    if (isModelUnavailableError(result.status, errMsg)) {
-      const suggested = extractSuggestedModelFromError(errMsg);
-      if (suggested && !attempted.has(suggested)) {
-        candidateQueue.splice(i + 1, 0, suggested);
-      }
+    if (!result.ok && isFatalAuthError(result.status, errMsg)) {
       finalResult = result;
-      continue;
+      break;
+    }
+
+    // Cualquier fallo recuperable del modelo (429 cuota, 5xx saturación, 404, red o respuesta vacía)
+    // registra el motivo y salta automáticamente al siguiente modelo de la lista
+    if (!firstFailureReason) {
+      firstFailureReason = classifyFailureReason(result.status, errMsg, Boolean(result.empty));
+      firstFailurePermanent = !result.ok && isModelUnavailableError(result.status, errMsg);
     }
 
     finalResult = result;
-    break;
-  }
-
-  // Último intento consultando los modelos activos reales si toda la cola falló por disponibilidad
-  if (finalResult && !finalResult.ok) {
-    const lastErr = finalResult.data?.error?.message || '';
-    if (isModelUnavailableError(finalResult.status, lastErr)) {
-      try {
-        const available = await detectAvailableModels(apiKey);
-        const verified = available.find((m) => m.verified && !attempted.has(m.id)) ||
-          available.find((m) => !attempted.has(m.id));
-        if (verified) {
-          usedModel = verified.id;
-          finalResult = await runModelToolLoop({
-            apiKey,
-            model: usedModel,
-            systemInstruction,
-            baseContents: contents,
-            logs,
-            settings
-          });
-        }
-      } catch {
-        // Mantener el error original si la detección falla
-      }
-    }
   }
 
   if (!finalResult || !finalResult.ok) {
     const rawErr = finalResult?.data?.error?.message || `Error HTTP ${finalResult?.status || '?'} al consultar Gemini.`;
     const errMsg = sanitizeErrorMessage(rawErr, apiKey);
     if (finalResult?.status === 429) {
-      throw new Error(`Límite de peticiones gratuitas alcanzado temporalmente. Espera unos segundos o cambia entre gemini-3.5-flash-lite y gemini-3.8-flash en Ajustes. (${errMsg})`);
+      throw new Error(`Se alcanzó el límite gratuito en todos los modelos disponibles. Espera unos segundos e inténtalo de nuevo. (${errMsg})`);
     }
     throw new Error(errMsg);
   }
 
   if (finalResult.empty || !finalResult.parsed) {
-    throw new Error('Gemini devolvió una respuesta vacía. Intenta reformular la consulta.');
+    throw new Error('Ninguno de los modelos pudo generar una respuesta válida. Intenta reformular la consulta.');
   }
 
+  const fallbackUsed = usedModel !== requestedModel;
   return {
     ...finalResult.parsed,
     blockedByGuardrail: !finalResult.parsed.is_allowed_topic,
-    usedModel
+    requestedModel,
+    usedModel,
+    fallbackUsed,
+    fallbackReason: fallbackUsed ? firstFailureReason : null,
+    shouldPersistFallbackModel: fallbackUsed && firstFailurePermanent
   };
 }

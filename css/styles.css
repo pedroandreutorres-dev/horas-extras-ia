@@ -714,6 +714,7 @@ textarea:focus {
   gap: 6px;
 }
 
+.model-pill,
 .memory-pill {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -721,7 +722,35 @@ textarea:focus {
   padding: 3px 9px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.model-pill {
+  color: var(--indigo);
+}
+
+.memory-pill {
   color: var(--accent);
+}
+
+.fallback-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.model-active-hint {
+  font-size: 0.78rem;
+  color: var(--green);
+  font-weight: 600;
+  margin-top: 2px;
 }
 
 .chat-bubble.assistant.blocked {

@@ -38,6 +38,7 @@ import { updateDashboardCharts, renderChatChart } from './charts.js';
 import {
   DEFAULT_GEMINI_MODEL,
   PRESET_GEMINI_MODELS,
+  SUPPORTED_GEMINI_MODEL_IDS,
   detectAvailableModels,
   askGeminiAboutOvertime,
   sanitizeErrorMessage
@@ -600,6 +601,10 @@ function renderDashboard() {
 function refreshAIStatusBanner() {
   const hasKey = hasConfiguredApiKey();
   $('ai-key-banner').classList.toggle('hidden', hasKey);
+  const activeModel = SUPPORTED_GEMINI_MODEL_IDS.has(state.settings.geminiModel)
+    ? state.settings.geminiModel
+    : DEFAULT_GEMINI_MODEL;
+  $('ai-active-model').textContent = `🤖 ${activeModel}`;
   const completedTurns = Math.floor(state.chatHistory.length / 2);
   $('ai-memory-count').textContent = String(completedTurns);
 }
@@ -624,18 +629,30 @@ function restoreChatHistoryUI() {
       role: msg.role === 'user' ? 'user' : 'assistant',
       text: msg.text,
       highlights: msg.highlights || [],
-      chart: msg.chart || null
+      chart: msg.chart || null,
+      fallbackInfo: msg.fallbackInfo || null
     });
   }
 }
 
-function appendChatBubble({ role, text, highlights = [], chart = null, isLoading = false, isBlocked = false }) {
+function appendChatBubble({
+  role,
+  text,
+  highlights = [],
+  chart = null,
+  fallbackInfo = null,
+  isLoading = false,
+  isBlocked = false
+}) {
   const container = $('chat-messages');
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${role}${isBlocked ? ' blocked' : ''}`;
 
   if (isLoading) {
-    bubble.innerHTML = `<div class="chat-markdown"><p>⏳ Analizando tu base de datos con <strong>Gemini</strong>...</p></div>`;
+    const activeModel = SUPPORTED_GEMINI_MODEL_IDS.has(state.settings.geminiModel)
+      ? state.settings.geminiModel
+      : DEFAULT_GEMINI_MODEL;
+    bubble.innerHTML = `<div class="chat-markdown"><p>⏳ Consultando a <strong>${escapeHTML(activeModel)}</strong>...</p></div>`;
     container.appendChild(bubble);
     container.scrollTop = container.scrollHeight;
     return bubble;
@@ -649,6 +666,14 @@ function appendChatBubble({ role, text, highlights = [], chart = null, isLoading
   }
 
   // Burbuja del asistente
+  if (fallbackInfo && fallbackInfo.to) {
+    const fbBadge = document.createElement('div');
+    fbBadge.className = 'fallback-pill';
+    const reasonText = fallbackInfo.reason ? ` (${fallbackInfo.from} falló por ${fallbackInfo.reason})` : '';
+    fbBadge.textContent = `⚡ Respaldo automático: ${fallbackInfo.to}${reasonText}`;
+    bubble.appendChild(fbBadge);
+  }
+
   if (isBlocked) {
     const guardBadge = document.createElement('div');
     guardBadge.className = 'chat-highlights';
@@ -715,12 +740,20 @@ async function handleSendAIChat(questionText) {
     loadingBubble.remove();
 
     const isBlocked = response.is_allowed_topic === false || response.blockedByGuardrail;
+    const fallbackInfo = response.fallbackUsed
+      ? {
+          from: response.requestedModel,
+          to: response.usedModel,
+          reason: response.fallbackReason
+        }
+      : null;
 
     appendChatBubble({
       role: 'assistant',
       text: response.answer_markdown,
       highlights: response.highlights,
       chart: response.chart,
+      fallbackInfo,
       isBlocked
     });
 
@@ -731,14 +764,20 @@ async function handleSendAIChat(questionText) {
         role: 'model',
         text: response.answer_markdown,
         highlights: response.highlights || [],
-        chart: response.chart || null
+        chart: response.chart || null,
+        ...(fallbackInfo ? { fallbackInfo } : {})
       });
       state.chatHistory = saveChatMemory(state.chatHistory);
     }
 
-    if (response.usedModel && response.usedModel !== state.settings.geminiModel) {
+    if (response.shouldPersistFallbackModel && response.usedModel && response.usedModel !== state.settings.geminiModel) {
       state.settings = saveSettings({ geminiModel: response.usedModel });
-      showToast(`Modelo ajustado automáticamente a ${response.usedModel}`);
+      if (state.activeView === 'view-settings') {
+        populateModelSelect(state.detectedModels);
+      }
+      showToast(`Modelo actualizado a ${response.usedModel} (anterior no disponible)`);
+    } else if (fallbackInfo) {
+      showToast(`⚡ Respondido con respaldo: ${response.usedModel}`);
     }
     refreshAIStatusBanner();
   } catch (err) {
@@ -756,41 +795,36 @@ async function handleSendAIChat(questionText) {
 
 function populateModelSelect(customModels = []) {
   const select = $('set-gemini-model');
-  const current = state.settings.geminiModel || DEFAULT_GEMINI_MODEL;
+  const rawCurrent = state.settings.geminiModel || DEFAULT_GEMINI_MODEL;
 
-  const seen = new Set();
-  const options = [];
-
-  const sourceList = customModels.length > 0
-    ? customModels.map((m) => ({
-        id: m.id,
-        label: m.verified
-          ? `✅ ${m.id} (Verificado con tu API Key)`
-          : m.displayName && m.displayName !== m.id
-            ? `${m.id} (${m.displayName})`
-            : m.id
-      }))
+  const baseList = customModels.length > 0
+    ? customModels.filter((m) => SUPPORTED_GEMINI_MODEL_IDS.has(m.id))
     : PRESET_GEMINI_MODELS;
 
-  for (const m of sourceList) {
-    if (!seen.has(m.id)) {
-      seen.add(m.id);
-      options.push(m);
-    }
-  }
+  const list = baseList.length > 0 ? baseList : PRESET_GEMINI_MODELS;
+  const current = list.some((m) => m.id === rawCurrent) ? rawCurrent : list[0].id;
 
-  if (current && !seen.has(current)) {
-    options.unshift({ id: current, label: `${current} (Guardado)` });
-  }
-
+  const seen = new Set();
   select.innerHTML = '';
-  for (const item of options) {
+
+  for (const m of list) {
+    if (seen.has(m.id)) continue;
+    seen.add(m.id);
+
+    const isSelected = m.id === current;
+    const desc = m.description || PRESET_GEMINI_MODELS.find((p) => p.id === m.id)?.description || '';
     const opt = document.createElement('option');
-    opt.value = item.id;
-    opt.textContent = item.label;
+    opt.value = m.id;
+    opt.textContent = `${isSelected ? '✅ ' : ''}${m.id}${desc ? ` · ${desc}` : ''}`;
     select.appendChild(opt);
   }
+
   select.value = current;
+
+  const hintEl = $('set-model-active-hint');
+  if (hintEl) {
+    hintEl.textContent = `✅ Seleccionado para consultas: ${current}`;
+  }
 }
 
 async function refreshSettingsView() {
@@ -1050,6 +1084,7 @@ function bindEvents() {
   $('set-gemini-model').addEventListener('change', () => {
     const chosenModel = $('set-gemini-model').value;
     state.settings = saveSettings({ geminiModel: chosenModel });
+    populateModelSelect(state.detectedModels);
     refreshAIStatusBanner();
     showToast(`🤖 Modelo cambiado a ${chosenModel}`);
   });
@@ -1059,12 +1094,13 @@ function bindEvents() {
     const btn = $('btn-save-verify-ai');
     const statusBox = $('ai-detect-status');
     const typedKey = $('set-gemini-key').value.trim();
+    const selectedBefore = $('set-gemini-model').value;
 
     btn.disabled = true;
     btn.textContent = '⏳ Guardando y comprobando...';
     statusBox.className = 'status-box';
     statusBox.classList.remove('hidden');
-    statusBox.textContent = 'Verificando API Key y modelos activos...';
+    statusBox.textContent = 'Verificando API Key y modelos compatibles...';
 
     try {
       let activeKey = typedKey;
@@ -1078,26 +1114,21 @@ function bindEvents() {
       const models = await detectAvailableModels(activeKey);
       state.detectedModels = models;
 
-      const verifiedModel = models.find((m) => m.verified);
-      const selectedCurrent = $('set-gemini-model').value;
-      const bestModel = verifiedModel
-        ? verifiedModel.id
-        : models.some((m) => m.id === selectedCurrent)
-          ? selectedCurrent
-          : models[0].id;
+      // Respetar el modelo elegido por el usuario si sigue disponible con su clave
+      const chosenModel = models.some((m) => m.id === selectedBefore)
+        ? selectedBefore
+        : (models.find((m) => m.verified) || models[0]).id;
 
       state.settings = saveSettings({
-        geminiModel: bestModel
+        geminiModel: chosenModel
       });
 
       await refreshSettingsView();
-      $('set-gemini-model').value = bestModel;
       refreshAIStatusBanner();
 
+      const verifiedCount = models.filter((m) => m.verified).length;
       statusBox.className = 'status-box ok';
-      statusBox.textContent = verifiedModel
-        ? `✅ API Key cifrada y conexión verificada. Modelo activo: ${bestModel}.`
-        : `✅ Conexión correcta. Modelo activo: ${bestModel} (${models.length} detectados).`;
+      statusBox.textContent = `✅ API Key cifrada y verificada. Modelo activo: ${chosenModel} (${verifiedCount}/${models.length} compatibles confirmados).`;
       showToast('🔒 Configuración IA guardada y verificada');
     } catch (err) {
       state.settings = getSettings();

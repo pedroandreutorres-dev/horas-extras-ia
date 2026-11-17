@@ -254,6 +254,7 @@
 
           <div class="ai-status-bar">
             <div class="ai-status-badges">
+              <span class="model-pill" id="ai-active-model">🤖 gemini-3.5-flash-lite</span>
               <span class="memory-pill">🧠 Memoria: <strong id="ai-memory-count">0</strong> turnos</span>
             </div>
             <button type="button" id="btn-clear-chat" class="btn btn-secondary btn-sm">🧹 Nueva conversación</button>
@@ -341,6 +342,7 @@
             <div class="field">
               <label for="set-gemini-model">Modelo Gemini</label>
               <select id="set-gemini-model"></select>
+              <div class="model-active-hint" id="set-model-active-hint"></div>
             </div>
 
             <div class="btn-stack">
